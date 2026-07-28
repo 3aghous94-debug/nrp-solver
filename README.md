@@ -147,13 +147,15 @@ analysis = count_possible_outcomes(
 | 1 week, 1 shift, 5 nurses | 7 | 5 | <0.001s | ✅ |
 | 2 weeks, 2 shifts, 10 nurses, 1S+1J | 56 | 10 | 0.006s | ✅ |
 | 4 weeks, 2 shifts, 14 nurses, cov=2 | 112 | 14 | 0.002s | ✅ |
-| 8 weeks, 2 shifts, 20 nurses, 1S+1J | 224 | 20 | 0.12s | ✅ |
+| 8 weeks, 2 shifts, 20 nurses, 1S+1J | 224 | 20 | 0.025s | ✅ |
 
-DWEC is **1000–30000× faster** than ILP on benchmarks, with identical spread.
+DWEC is **1000–30000× faster** than ILP on benchmarks where both produce results.
 
 ## Honest limits
 
-- **EF1 is achieved when structurally possible.** When skill concentration or availability makes it impossible (e.g., 4 seniors for 28 senior slots), no algorithm can achieve EF1 — the solver achieves the best possible spread instead.
+- **DWEC maintains spread ≤ w_max as an invariant.** When a good can't be placed without violating the spread bound, it is left uncovered (`coverage_ok=False`). This happens when the only feasible allocations have spread > w_max (i.e., EF1 is structurally impossible). The ILP backend can find these non-EF1 allocations if needed.
+- **EF1 is not always achievable.** Skill concentration and availability can make it structurally impossible. No algorithm can achieve EF1 in these cases — the ILP confirms when the minimum achievable spread exceeds w_max.
+- **DWEC is a greedy heuristic, not a complete algorithm.** On some instances where EF1 is achievable, DWEC may fail to find it due to its single-step ejection mechanism. The ILP backend is exact but slower.
 - **Outcome counting is exact only for small instances** (n^m ≤ 10⁷). For real NRP, you get feasibility + an upper bound + a recommendation to sample.
 - **Multi-schedule mode is sampling, not exhaustive enumeration.** You get up to N diverse schedules, not all valid schedules.
 - **Soft constraints / preferences** (nurse-specific shift preferences) are not supported — all constraints are hard.

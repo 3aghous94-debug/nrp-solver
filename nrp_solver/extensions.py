@@ -165,18 +165,42 @@ class MultiScheduleSolver:
             if ejection_found:
                 continue
 
-            # Defer to leftover (no relaxed placement — it violates the spread bound)
-            leftover.append(s_good)
+            # Spread-bound-checked placement: try all agents in load order.
+            # Place at first agent where skill matches, feasibility holds,
+            # and new_load - old_min <= w_max (spread bound maintained).
+            old_min = min_load
+            bound_found = False
+            for k2 in sorted(range(n), key=lambda i: loads[i]):
+                if instance.nurse_skills[k2] < req_skill:
+                    continue
+                if not instance.is_feasible_for(k2, pi[k2] | {s_good}):
+                    continue
+                new_load_k2 = loads[k2] + weights[s_good]
+                if new_load_k2 - old_min <= instance.w_max + 1e-9:
+                    pi[k2] = pi[k2] | {s_good}
+                    loads[k2] = new_load_k2
+                    shift_coverage[(d, s)].add(ci)
+                    bound_found = True
+                    break
+
+            if not bound_found:
+                leftover.append(s_good)
         
-        # Place leftover: only at global least-loaded (maintains spread bound)
+        # Place leftover: try agents in load order, place where spread bound maintained
         for s_good in leftover:
             d, s, ci, req_skill = s_good
-            k = min(range(n), key=lambda i: loads[i])
-            if (instance.nurse_skills[k] >= req_skill and
-                instance.is_feasible_for(k, pi[k] | {s_good})):
-                pi[k] = pi[k] | {s_good}
-                loads[k] += weights[s_good]
-                shift_coverage[(d, s)].add(ci)
+            old_min = min(loads)
+            for k in sorted(range(n), key=lambda i: loads[i]):
+                if instance.nurse_skills[k] < req_skill:
+                    continue
+                if not instance.is_feasible_for(k, pi[k] | {s_good}):
+                    continue
+                new_load_k = loads[k] + weights[s_good]
+                if new_load_k - old_min <= instance.w_max + 1e-9:
+                    pi[k] = pi[k] | {s_good}
+                    loads[k] = new_load_k
+                    shift_coverage[(d, s)].add(ci)
+                    break
         
         coverage_ok = all(
             len(shift_coverage[(d, s)]) == len(reqs)
@@ -581,9 +605,9 @@ class PreAssignmentDWECBackend(DWECBackend):
         # Remaining goods to assign
         remaining_goods = [g for g in instance.goods if g not in instance.pre_assigned_goods]
         
-        # Sort remaining goods
+        # Sort remaining goods: decreasing weight, then day/shift, then decreasing skill
         sorted_goods = sorted(remaining_goods,
-                             key=lambda g: (-weights[g], -g[3]))
+                             key=lambda g: (-weights[g], g[0], g[1], -g[3]))
         
         leftover = []
         stats = {"direct": 0, "ejections": 0, "relaxed": 0, "deferred": 0,
@@ -637,19 +661,43 @@ class PreAssignmentDWECBackend(DWECBackend):
             if ejection_found:
                 continue
 
-            # Defer to leftover (no relaxed placement — it violates the spread bound)
-            leftover.append(s_good)
+            # Spread-bound-checked placement: try all agents in load order.
+            # Place at first agent where skill matches, feasibility holds,
+            # and new_load - old_min <= w_max (spread bound maintained).
+            old_min = min_load
+            bound_found = False
+            for k2 in sorted(range(n), key=lambda i: loads[i]):
+                if instance.nurse_skills[k2] < req_skill:
+                    continue
+                if not instance.is_feasible_for(k2, pi[k2] | {s_good}):
+                    continue
+                new_load_k2 = loads[k2] + weights[s_good]
+                if new_load_k2 - old_min <= instance.w_max + 1e-9:
+                    pi[k2] = pi[k2] | {s_good}
+                    loads[k2] = new_load_k2
+                    shift_coverage[(d, s)].add(ci)
+                    bound_found = True
+                    break
+
+            if not bound_found:
+                leftover.append(s_good)
             stats["deferred"] += 1
         
-        # Place leftover: only at global least-loaded (maintains spread bound)
+        # Place leftover: try agents in load order, place where spread bound maintained
         for s_good in leftover:
             d, s, ci, req_skill = s_good
-            k = min(range(n), key=lambda i: loads[i])
-            if (instance.nurse_skills[k] >= req_skill and
-                instance.is_feasible_for(k, pi[k] | {s_good})):
-                pi[k] = pi[k] | {s_good}
-                loads[k] += weights[s_good]
-                shift_coverage[(d, s)].add(ci)
+            old_min = min(loads)
+            for k in sorted(range(n), key=lambda i: loads[i]):
+                if instance.nurse_skills[k] < req_skill:
+                    continue
+                if not instance.is_feasible_for(k, pi[k] | {s_good}):
+                    continue
+                new_load_k = loads[k] + weights[s_good]
+                if new_load_k - old_min <= instance.w_max + 1e-9:
+                    pi[k] = pi[k] | {s_good}
+                    loads[k] = new_load_k
+                    shift_coverage[(d, s)].add(ci)
+                    break
         
         coverage_ok = all(
             len(shift_coverage[(d, s)]) == len(reqs)
