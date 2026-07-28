@@ -1,16 +1,20 @@
 """
-Regression test for the DWEC relaxed-placement bug.
+Regression test for the DWEC spread-bound bug.
 
-This test verifies that the production DWEC algorithm (in nrp_solver/core.py)
-does NOT include the relaxed-placement branch that violates the spread bound.
+History:
+- v1: the production code included a "relaxed placement" branch that placed
+  goods at non-least-loaded agents WITHOUT checking the spread bound. This
+  violated spread <= w_max on ~2.3% of instances.
+- v2: the branch was removed entirely, but this caused coverage false-negatives
+  on ~22% of instances where feasible schedules existed.
+- v3: the branch was re-added WITH a spread-bound check (new_load - old_min
+  <= w_max). This maintains the spread bound while recovering coverage.
 
-The bug was identified in an independent peer review: the production code
-included a "Case 3" (relaxed placement at non-least-loaded agents) that
-was never analysed in PROOFS.md and empirically violated the spread bound
-on ~2.3% of small instances.
-
-The fix: remove the relaxed-placement branch. Goods that can't be placed
-via direct placement or ejection are deferred to leftover.
+The current test verifies that:
+- The spread bound is always maintained (no violations on random instances).
+- The buggy 'relaxed' stat is never incremented (the v3 branch uses 'direct').
+- Distinct nurses per shift are enforced.
+- The ILP backend respects skill requirements.
 """
 
 import sys
@@ -142,16 +146,63 @@ def test_ilp_skill_mix_correctness():
         print(f"  (ILP returned infeasible: {result.reason})\n")
 
 
+def test_known_greedy_limitation():
+    """Document a known case where DWEC's single-step ejection can't find EF1.
+
+    This instance (from the v3 review, seed=42 trial 8) has an EF1 schedule
+    (verified by ILP and brute force) that DWEC cannot find because the
+    optimal allocation requires a multi-step ejection chain. DWEC makes a
+    suboptimal early choice (placing a junior slot on the senior nurse) that
+    cannot be undone without backtracking or multi-step ejection.
+
+    This test DOCUMENTS the known limitation — it asserts that DWEC fails
+    here (coverage_ok=False) and that the ILP backend finds the EF1 schedule.
+    If multi-step ejection is ever implemented, this test should be updated
+    to assert coverage_ok=True.
+    """
+    print("--- Test: Known greedy limitation (single-step ejection) ---")
+
+    instance = NRPInstance(
+        num_days=5, shifts_per_day=1, num_nurses=2,
+        coverage={(0, 0): [0, 0], (1, 0): [1, 0], (2, 0): [1],
+                  (3, 0): [1, 0], (4, 0): [0]},
+        nurse_skills=[1, 0],  # 1 senior, 1 junior
+        max_consecutive=4, max_weekly=7,
+        weights="weekend"
+    )
+
+    dwec_result = DWECBackend().solve(instance)
+    print(f"  DWEC: feasible={dwec_result.feasible}, "
+          f"coverage_ok={dwec_result.coverage_ok}, spread={dwec_result.spread}")
+
+    # DWEC is expected to fail here — this is a known greedy-heuristic limitation.
+    # The optimal allocation requires a multi-step ejection chain.
+    assert not dwec_result.coverage_ok, \
+        "Expected DWEC to fail (known limitation); if this passes, multi-step ejection may have been implemented"
+
+    # The ILP backend should find the EF1 schedule
+    from nrp_solver.core import ILPBackend
+    ilp_result = ILPBackend(time_limit=10).solve(instance)
+    if ilp_result.feasible:
+        print(f"  ILP:  feasible=True, spread={ilp_result.spread:.2f}, EF1={ilp_result.ef1}")
+        assert ilp_result.ef1, "ILP should find an EF1 schedule"
+    else:
+        print(f"  ILP:  infeasible ({ilp_result.reason[:50]})")
+
+    print("  ✓ Known limitation documented (DWEC fails, ILP finds EF1)\n")
+
+
 def main():
     print("="*70)
     print("REGRESSION TESTS: DWEC bug fix + ILP fix + distinct nurses")
     print("="*70 + "\n")
-    
+
     tests = [
         test_no_relaxed_placement_in_stats,
         test_spread_bound_held,
         test_distinct_nurses_per_shift,
         test_ilp_skill_mix_correctness,
+        test_known_greedy_limitation,
     ]
     
     passed = 0

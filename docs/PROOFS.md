@@ -55,6 +55,14 @@ The proof has three parts: (a) Key Lemma (cascade termination), (b) EF1 invarian
 
 So case (i) always applies when pairs are exhausted. After at most n·m rotations (each strictly decreases the sorted-load potential, which is bounded below), the cascade must terminate with a direct addition. □
 
+> **Note on the Key Lemma proof (open gap).** The argument above contains two assertions that are not fully proven:
+>
+> 1. *"No envy cycle ⇒ load vector is strictly ordered"* — this is not strictly true as stated; ties are possible (e.g., loads `(2, 2, 3)` have no envy cycle but are not strictly ordered). The correct statement is that the absence of an envy cycle implies the envy graph is acyclic, which constrains the load structure but does not force strict ordering.
+>
+> 2. *"By feasibility, some allocation exists, so the good can be placed in some configuration. Contradiction."* — this implication requires that feasibility (an allocation exists for the full instance) implies the current good can be placed at the current point in the cascade via a swap chain. This is the heart of the proof. For matroidal F, it follows from the augmentation axiom (Biswas & Barman 2018). For LE families, the argument needs to be adapted: LE guarantees a single swap exists, but the cascade may need multiple swaps to reach a feasible configuration.
+>
+> The computational verification (56/56 LE+feasible instances achieve EF1) is consistent with the theorem being true, but does not constitute a proof. Closing this gap — probably by adapting Biswas–Barman's matroid-augmentation argument to LE families — is left as open work. The theorem is *believed true* and the algorithm is empirically correct, but the proof as written is incomplete.
+
 #### (b) EF1 Invariant
 
 **Claim.** spread(π) ≤ 1 is maintained throughout.
@@ -197,6 +205,27 @@ By constraint (iv): w(t) ≥ w(s). By constraint (vi): ℓ_j − ℓ_min ≥ w(t
 - If ℓ_min + w(t) > old_max: spread = (ℓ_min + w(t)) − ℓ_min = w(t) ≤ w_max. ✓
 
 **The min-preservation constraint (vi) is key.** It ensures the ejection site j doesn't drop below the current minimum. The maximum is bounded by w(t) ≤ w_max because t was already placed (all placed goods have weight ≤ w_max). □
+
+#### Case 3: Spread-bound-checked placement at non-least-loaded agent
+
+When neither direct placement at the least-loaded agent (Case 1) nor ejection (Case 2) succeeds, the algorithm tries placing `s` at any agent `k'` (not necessarily the least-loaded) where the spread bound is maintained. Specifically, it searches agents in increasing load order and places `s` at the first agent `k'` satisfying:
+
+- `nurse_skills[k'] ≥ req_skill` (skill match)
+- `is_feasible_for(k', π_{k'} ∪ {s})` (feasibility)
+- `loads[k'] + w(s) − old_min ≤ w_max` (spread-bound check)
+
+**Claim.** Spread ≤ w_max is maintained.
+
+**Proof.** Let old_min = min loads before placement. The new load of `k'` is `loads[k'] + w(s)`.
+
+- New max = max(old_max, loads[k'] + w(s)).
+- New min ≥ old_min (k' may or may not be the minimum; if k' is the unique minimum, its new load `loads[k'] + w(s) ≥ loads[k'] = old_min`, so the min doesn't decrease; if k' is not the minimum, the min is unchanged).
+- If `loads[k'] + w(s) ≤ old_max`: new max = old_max. Spread = old_max − new_min ≤ old_max − old_min ≤ w_max (by inductive hypothesis). ✓
+- If `loads[k'] + w(s) > old_max`: new max = loads[k'] + w(s). Spread = (loads[k'] + w(s)) − new_min ≤ (loads[k'] + w(s)) − old_min. The spread-bound check ensures `loads[k'] + w(s) − old_min ≤ w_max`. ✓
+
+This case is a strict generalisation of Case 1 (when k' = k, the least-loaded agent, the check reduces to `ℓ_min + w(s) − ℓ_min = w(s) ≤ w_max`, which always holds). □
+
+**Remark.** Cases 1–3 together cover all branches of the shipped `DWECBackend.solve` algorithm. The leftover-placement loop (for deferred goods) uses the same Case 3 logic. Goods that cannot be placed via any of Cases 1–3 are left uncovered (`coverage_ok = False`); this occurs when the only feasible placements would violate the spread bound, i.e., when EF1 is structurally impossible or when the greedy ordering has made a suboptimal early choice that single-step ejection cannot undo (see §Limitations below).
 
 ### Computational verification
 

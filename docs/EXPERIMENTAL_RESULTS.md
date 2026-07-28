@@ -1,6 +1,8 @@
 # Experimental Results
 
-This document records the key experimental results that verify the theoretical claims. All experiments are reproducible — the scripts are in the `theory/` and `benchmarks/` directories.
+This document records the key experimental results that verify the theoretical claims.
+
+> **Reproducibility note:** The verification scripts in `theory/` reference modules from an earlier development branch that were consolidated into the `nrp_solver/` package. Some scripts (those importing `local_exchange_ef1`, `bfp_solver_toolkit`, `weighted_extension`, `dwec_algorithm`) require these modules to be vendored or reconstructed to run. See `theory/README.md` for details. The production solver in `nrp_solver/core.py` is the consolidated, tested version. The "56/56", "256/256", "31/31" numbers below were verified during development and are consistent with the algorithm's behavior, but are not directly reproducible from the public release without the missing modules. The "359/359" DWEC verification IS reproducible via `theory/dwec_verification.py` after vendoring.
 
 ## Table of contents
 
