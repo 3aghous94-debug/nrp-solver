@@ -17,8 +17,9 @@ Tests all conflict types:
 """
 
 import sys
-sys.path.insert(0, '/home/z/my-project/scripts')
-from three_features import solve_with_preassignment, PreAssignmentNRPInstance
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from nrp_solver.extensions import solve_with_preassignment, PreAssignmentNRPInstance
 
 
 def test_conflict_day_unavailability():

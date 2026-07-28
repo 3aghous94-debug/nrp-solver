@@ -14,8 +14,9 @@ Tests:
 
 import time
 import sys
-sys.path.insert(0, '/home/z/my-project/scripts')
-from availability_extension import (
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from nrp_solver.availability import (
     AvailabilityNRPInstance, AvailabilityNRPSolver, solve_nrp_with_availability
 )
 

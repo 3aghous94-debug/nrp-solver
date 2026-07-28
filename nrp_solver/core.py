@@ -135,13 +135,21 @@ class NRPInstance:
             else:
                 run = 1
         
-        # One shift per day
+        # One shift per day (can't work different shifts on the same day)
         days_with_shifts = defaultdict(set)
         for (d, s, ci, sk) in bundle:
             days_with_shifts[d].add(s)
         for d, shifts in days_with_shifts.items():
             if len(shifts) > 1 and self.shifts_per_day > 1:
                 return False
+
+        # At most one slot per shift (coverage = distinct nurses per shift)
+        shift_slots = defaultdict(set)
+        for (d, s, ci, sk) in bundle:
+            shift_slots[(d, s)].add(ci)
+        for (d, s), cis in shift_slots.items():
+            if len(cis) > 1:
+                return False  # same nurse can't take 2 slots of the same shift
         
         # Skill check
         nurse_skill = self.nurse_skills[nurse_idx]
@@ -303,32 +311,28 @@ class DWECBackend:
             
             if ejection_found:
                 continue
-            
-            # Relaxed placement
-            feasible_agents = [i for i in range(n)
-                             if instance.nurse_skills[i] >= req_skill and
-                             instance.is_feasible_for(i, pi[i] | {s_good})]
-            if feasible_agents:
-                i = min(feasible_agents, key=lambda i: loads[i])
-                pi[i] = pi[i] | {s_good}
-                loads[i] += weights[s_good]
-                shift_coverage[(d, s)].add(ci)
-                stats["relaxed"] += 1
-            else:
-                leftover.append(s_good)
-                stats["deferred"] += 1
+
+            # If neither direct placement nor ejection works, defer to leftover.
+            # Do NOT do relaxed placement at a non-least-loaded agent — it
+            # violates the spread bound (see PROOFS.md §3, Case 2 analysis).
+            leftover.append(s_good)
+            stats["deferred"] += 1
         
-        # Place leftover (no forcing)
+        # Place leftover: only at the global least-loaded agent, and only if
+        # the spread bound is maintained. Goods that can't be placed without
+        # violating the bound are left uncovered (coverage_ok will be False).
         for s_good in leftover:
             d, s, ci, req_skill = s_good
-            feasible_agents = [i for i in range(n)
-                             if instance.nurse_skills[i] >= req_skill and
-                             instance.is_feasible_for(i, pi[i] | {s_good})]
-            if feasible_agents:
-                i = min(feasible_agents, key=lambda i: loads[i])
-                pi[i] = pi[i] | {s_good}
-                loads[i] += weights[s_good]
+            min_load = min(loads)
+            # Try least-loaded feasible agent first (maintains spread bound)
+            k = min(range(n), key=lambda i: loads[i])
+            if (instance.nurse_skills[k] >= req_skill and
+                instance.is_feasible_for(k, pi[k] | {s_good})):
+                pi[k] = pi[k] | {s_good}
+                loads[k] += weights[s_good]
                 shift_coverage[(d, s)].add(ci)
+            # If least-loaded can't take it, leave it uncovered.
+            # Do NOT place at a non-least-loaded agent — that violates the bound.
         
         # Verify coverage
         coverage_ok = all(
@@ -379,20 +383,32 @@ class ILPBackend:
         prob = LpProblem("NRP", LpMinimize)
         
         # Variables: x[i][j] = 1 if nurse i gets good j
+        # Only create variables for qualified nurses (fixes the skill-mix bug)
         x = {}
         for i in range(n):
-            for j in range(m):
-                x[(i, j)] = LpVariable(f"x_{i}_{j}", 0, 1, cat='Binary')
+            for j, good in enumerate(goods):
+                if instance.nurse_skills[i] >= good[3]:
+                    x[(i, j)] = LpVariable(f"x_{i}_{j}", 0, 1, cat='Binary')
         
         T = LpVariable("T", lowBound=0, cat='Continuous')
         L = LpVariable("L", lowBound=0, cat='Continuous')
         
         prob += T
         
-        # Coverage: each good assigned to exactly one nurse with right skill
+        # Coverage: each good assigned to exactly one qualified nurse
         for j, good in enumerate(goods):
             prob += lpSum(x[(i, j)] for i in range(n)
-                         if instance.nurse_skills[i] >= good[3]) == 1
+                         if (i, j) in x) == 1
+        
+        # Distinct nurses per shift: each nurse takes at most one slot per shift
+        shift_to_slots = defaultdict(list)
+        for j, good in enumerate(goods):
+            shift_to_slots[(good[0], good[1])].append(j)
+        for i in range(n):
+            for (d, s), slot_indices in shift_to_slots.items():
+                if len(slot_indices) > 1:
+                    prob += lpSum(x[(i, j)] for j in slot_indices
+                                 if (i, j) in x) <= 1
         
         # Per-nurse constraints
         for i in range(n):
@@ -400,13 +416,13 @@ class ILPBackend:
             for week_start in range(0, instance.num_days, 7):
                 week_end = min(week_start + 7, instance.num_days)
                 week_goods = [j for j, g in enumerate(goods) if week_start <= g[0] < week_end]
-                prob += lpSum(x[(i, j)] for j in week_goods) <= instance.max_weekly
+                prob += lpSum(x[(i, j)] for j in week_goods if (i, j) in x) <= instance.max_weekly
             
             # Consecutive days (linearized: for each window of K+1 days, at most K)
             for start in range(instance.num_days - instance.max_consecutive):
                 window_goods = [j for j, g in enumerate(goods)
                                if start <= g[0] <= start + instance.max_consecutive]
-                prob += lpSum(x[(i, j)] for j in window_goods) <= instance.max_consecutive
+                prob += lpSum(x[(i, j)] for j in window_goods if (i, j) in x) <= instance.max_consecutive
             
             # One shift per day
             for d in range(instance.num_days):
@@ -426,10 +442,10 @@ class ILPBackend:
                         # Binary indicator: nurse works shift s on day d
                         # This is complex; simplify: at most max_consecutive_in_day shifts
                         # Actually for standard NRP: at most 1 shift per day
-                        prob += lpSum(x[(i, j)] for j in day_goods) <= 1
+                        prob += lpSum(x[(i, j)] for j in day_goods if (i, j) in x) <= 1
             
             # Load balance
-            load_i = lpSum(weights[goods[j]] * x[(i, j)] for j in range(m))
+            load_i = lpSum(weights[goods[j]] * x[(i, j)] for j in range(m) if (i, j) in x)
             prob += load_i >= L
             prob += load_i <= L + T
         
@@ -444,7 +460,7 @@ class ILPBackend:
         for i in range(n):
             bundle = set()
             for j in range(m):
-                if value(x[(i, j)]) > 0.5:
+                if (i, j) in x and value(x[(i, j)]) > 0.5:
                     bundle.add(goods[j])
             pi.append(bundle)
         

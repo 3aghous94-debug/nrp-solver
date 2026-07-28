@@ -30,10 +30,8 @@ import time
 from typing import List, Dict, Set, Tuple, Optional
 from collections import defaultdict
 
-# Import the base module
-import sys
-sys.path.insert(0, '/home/z/my-project/scripts')
-from nrp_solver import NRPInstance, NRPSolver, NRPResult, InfeasibilityDetector, DWECBackend
+# Import from the core module (relative import)
+from .core import NRPInstance, NRPSolver, NRPResult, InfeasibilityDetector, DWECBackend
 
 
 class AvailabilityNRPInstance(NRPInstance):
@@ -228,7 +226,7 @@ class AvailabilityNRPSolver:
         if self.backend_name == "dwec":
             return AvailabilityDWECBackend().solve(instance)
         elif self.backend_name == "ilp":
-            from nrp_solver import ILPBackend
+            from .core import ILPBackend
             return ILPBackend(self.ilp_time_limit).solve(instance)
         else:
             raise ValueError(f"Unknown backend: {self.backend_name}")

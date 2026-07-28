@@ -26,12 +26,11 @@ from itertools import product, combinations
 from collections import defaultdict
 from typing import List, Dict, Set, Tuple, Optional
 
-import sys
-sys.path.insert(0, '/home/z/my-project/scripts')
-from availability_extension import (
-    AvailabilityNRPInstance, AvailabilityNRPSolver, solve_nrp_with_availability
+from .availability import (
+    AvailabilityNRPInstance, AvailabilityNRPSolver, solve_nrp_with_availability,
+    AvailabilityInfeasibilityDetector
 )
-from nrp_solver import NRPResult, DWECBackend, InfeasibilityDetector
+from .core import NRPResult, DWECBackend, InfeasibilityDetector
 
 
 # ============================================================
@@ -51,7 +50,6 @@ class MultiScheduleSolver:
     def solve(self, instance: AvailabilityNRPInstance) -> List[NRPResult]:
         """Return up to num_schedules diverse schedules."""
         # First check feasibility
-        from availability_extension import AvailabilityInfeasibilityDetector
         feasible, reason = AvailabilityInfeasibilityDetector.check(instance)
         if not feasible:
             return [NRPResult(feasible=False, reason=reason, method="infeasibility_check")]
@@ -166,29 +164,18 @@ class MultiScheduleSolver:
             
             if ejection_found:
                 continue
-            
-            # Relaxed
-            feasible_agents = [i for i in range(n)
-                             if instance.nurse_skills[i] >= req_skill and
-                             instance.is_feasible_for(i, pi[i] | {s_good})]
-            if feasible_agents:
-                i = min(feasible_agents, key=lambda i: loads[i])
-                pi[i] = pi[i] | {s_good}
-                loads[i] += weights[s_good]
-                shift_coverage[(d, s)].add(ci)
-            else:
-                leftover.append(s_good)
+
+            # Defer to leftover (no relaxed placement — it violates the spread bound)
+            leftover.append(s_good)
         
-        # Place leftover
+        # Place leftover: only at global least-loaded (maintains spread bound)
         for s_good in leftover:
             d, s, ci, req_skill = s_good
-            feasible_agents = [i for i in range(n)
-                             if instance.nurse_skills[i] >= req_skill and
-                             instance.is_feasible_for(i, pi[i] | {s_good})]
-            if feasible_agents:
-                i = min(feasible_agents, key=lambda i: loads[i])
-                pi[i] = pi[i] | {s_good}
-                loads[i] += weights[s_good]
+            k = min(range(n), key=lambda i: loads[i])
+            if (instance.nurse_skills[k] >= req_skill and
+                instance.is_feasible_for(k, pi[k] | {s_good})):
+                pi[k] = pi[k] | {s_good}
+                loads[k] += weights[s_good]
                 shift_coverage[(d, s)].add(ci)
         
         coverage_ok = all(
@@ -245,7 +232,7 @@ class OutcomeCounter:
         - enumerable: is exact counting feasible?
         - recommendation: guidance on whether to enumerate
         """
-        from availability_extension import AvailabilityInfeasibilityDetector
+        # AvailabilityInfeasibilityDetector is already imported at module level
         
         result = {
             "feasible": False,
@@ -649,31 +636,19 @@ class PreAssignmentDWECBackend(DWECBackend):
             
             if ejection_found:
                 continue
-            
-            # Relaxed
-            feasible_agents = [i for i in range(n)
-                             if instance.nurse_skills[i] >= req_skill and
-                             instance.is_feasible_for(i, pi[i] | {s_good})]
-            if feasible_agents:
-                i = min(feasible_agents, key=lambda i: loads[i])
-                pi[i] = pi[i] | {s_good}
-                loads[i] += weights[s_good]
-                shift_coverage[(d, s)].add(ci)
-                stats["relaxed"] += 1
-            else:
-                leftover.append(s_good)
-                stats["deferred"] += 1
+
+            # Defer to leftover (no relaxed placement — it violates the spread bound)
+            leftover.append(s_good)
+            stats["deferred"] += 1
         
-        # Place leftover
+        # Place leftover: only at global least-loaded (maintains spread bound)
         for s_good in leftover:
             d, s, ci, req_skill = s_good
-            feasible_agents = [i for i in range(n)
-                             if instance.nurse_skills[i] >= req_skill and
-                             instance.is_feasible_for(i, pi[i] | {s_good})]
-            if feasible_agents:
-                i = min(feasible_agents, key=lambda i: loads[i])
-                pi[i] = pi[i] | {s_good}
-                loads[i] += weights[s_good]
+            k = min(range(n), key=lambda i: loads[i])
+            if (instance.nurse_skills[k] >= req_skill and
+                instance.is_feasible_for(k, pi[k] | {s_good})):
+                pi[k] = pi[k] | {s_good}
+                loads[k] += weights[s_good]
                 shift_coverage[(d, s)].add(ci)
         
         coverage_ok = all(
@@ -703,7 +678,6 @@ class PreAssignmentSolver:
         self.ilp_time_limit = ilp_time_limit
     
     def solve(self, instance: PreAssignmentNRPInstance) -> NRPResult:
-        from availability_extension import AvailabilityInfeasibilityDetector
         feasible, reason = AvailabilityInfeasibilityDetector.check(instance)
         if not feasible:
             return NRPResult(feasible=False, reason=reason, method="infeasibility_check")
